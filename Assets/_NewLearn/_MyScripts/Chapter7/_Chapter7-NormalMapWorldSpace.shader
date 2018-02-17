@@ -1,8 +1,13 @@
-﻿// Upgrade NOTE: replaced '_World2Object' with 'unity_WorldToObject'
+﻿// Upgrade NOTE: replaced '_Object2World' with 'unity_ObjectToWorld'
+// Upgrade NOTE: replaced '_World2Object' with 'unity_WorldToObject'
 
 // Upgrade NOTE: replaced '_Object2World' with 'unity_ObjectToWorld'
 
-Shader "Learn/Chapter7/_NormalMapTangentSpace"
+// Upgrade NOTE: replaced '_World2Object' with 'unity_WorldToObject'
+
+// Upgrade NOTE: replaced '_Object2World' with 'unity_ObjectToWorld'
+
+Shader "Learn/Chapter7/_NormalMapWorldSpace"
 {
 	Properties{
 		_Specular("Specular",Color) = (1,1,1,1)
@@ -34,9 +39,10 @@ Shader "Learn/Chapter7/_NormalMapTangentSpace"
 			struct v2f
 			{
 				float4 pos:SV_POSITION;
-				float3 tangentViewDir:TEXCOORD0;//在顶点着色器计算好切线空间下的视角方向
-				float3 tangentLightDir:TEXCOORD1;//在顶点着色器上计算好切线空间下的光照方向
-				float4 uv:TEXCOORD2;
+				float4 TtoW0:TEXCOORD0;//切线空间到世界空间的第一行
+				float4 TtoW1:TEXCOORD1;//切线空间到世界空间的第二行
+				float4 TtoW2:TEXCOORD2;//切线空间到世界空间的第三行
+				float4 uv:TEXCOORD3;
 			};
 
 			fixed4 _Specular;
@@ -52,9 +58,16 @@ Shader "Learn/Chapter7/_NormalMapTangentSpace"
 			{
 				v2f o;
 				o.pos = mul(UNITY_MATRIX_MVP,v.vertex);
-				float3x3 objectToTangentMatrix = float3x3(v.tangent.xyz,cross(v.normal,v.tangent.xyz)*v.tangent.w,v.normal);//构造模型空间到切线空间的变换矩阵
-				o.tangentViewDir = mul(objectToTangentMatrix,ObjSpaceViewDir(v.vertex));//视角方向
-				o.tangentLightDir = mul(objectToTangentMatrix,ObjSpaceLightDir(v.vertex));//光照方向
+				float3 worldPos = mul(unity_ObjectToWorld,v.vertex).xyz;
+				//fixed3 worldNormal = mul(v.normal,(float3x3)unity_WorldToObject);//切线空间的法线在世界空间下的表示
+				fixed3 worldNormal = UnityObjectToWorldNormal(v.normal);
+				//fixed3 worldTangent = mul((float3x3)unity_ObjectToWorld,v.tangent.xyz);//切线空间的切线在世界空间下的表示
+				fixed3 worldTangent = UnityObjectToWorldDir(v.tangent.xyz);
+				fixed3 worldBiTangent = cross(worldNormal,worldTangent)*v.tangent.w;//切线空间的副切线在世界空间下的表示
+				//那么有如上三个向量 我们就可以构造切线空间到世界空间的变换矩阵(CG是按行来读和存 矩阵的每一位)
+				o.TtoW0 = float4(worldTangent.x,worldBiTangent.x,worldNormal.x,worldPos.x);
+				o.TtoW1 = float4(worldTangent.y,worldBiTangent.y,worldNormal.y,worldPos.y);
+				o.TtoW2 = float4(worldTangent.z,worldBiTangent.z,worldNormal.z,worldPos.z);
 				o.uv.xy = v.texcoord.xy*_MainTex_ST.xy+_MainTex_ST.zw;
 				o.uv.zw =v.texcoord.xy*_BumpTex_ST.xy+_BumpTex_ST.zw;
 				return o;
@@ -62,11 +75,14 @@ Shader "Learn/Chapter7/_NormalMapTangentSpace"
 
 			fixed4 frag(v2f i):SV_Target
 			{
-				fixed3 tangentLightDir = normalize(i.tangentLightDir);//模型该点在切线空间坐标下的光源方向
+				float3 worldPos = float3(i.TtoW0.w,i.TtoW1.w,i.TtoW2.w);//节省了寄存器得到顶点在世界空间下的表示
+				fixed3 viewDir = normalize(UnityWorldSpaceViewDir(worldPos));//视角方向
+				fixed3 worldLightDir = normalize(UnityWorldSpaceLightDir(worldPos));//模型该点在世界空间坐标下的光源方向
 				//fixed3 worldNormal = normalize(i.worldNormal);//点在世界空间下的法线
 				//fixed3 reflectDir = normalize(reflect(-worldLightDir,worldNormal));//光反射方向
 
 				fixed4 packedNormal = tex2D(_BumpTex,i.uv.zw);//采样法线的xy分量,要自己求z分量
+				fixed3 worldNormal;
 				fixed3 tangentNormal;
 				//不是Normal Map纹理类型,xy这样解出来
 				{
@@ -80,13 +96,16 @@ Shader "Learn/Chapter7/_NormalMapTangentSpace"
 
 				tangentNormal.z = sqrt(1-saturate(dot(tangentNormal.xy,tangentNormal.xy)));//根据单位向量的模为1求出z
 
-				fixed3 viewDir = normalize(i.tangentViewDir);//视角方向
-				fixed3 halfDir = normalize(viewDir+tangentLightDir);
-				fixed3 specular = _LightColor0.rgb*_Specular.rgb*pow(saturate( dot(tangentNormal,halfDir)),_Gloss);
+				worldNormal = mul(float3x3(i.TtoW0.xyz,i.TtoW1.xyz,i.TtoW2.xyz),tangentNormal);//将切线空间下的法线转换到世界空间下
+
+				//worldNormal = normalize(half3(dot(i.TtoW0.xyz,tangentNormal),dot(i.TtoW1.xyz,tangentNormal),dot(i.TtoW2.xyz,tangentNormal)));
+
+				fixed3 halfDir = normalize(viewDir+worldLightDir);
+				fixed3 specular = _LightColor0.rgb*_Specular.rgb*pow(saturate( dot(worldNormal,halfDir)),_Gloss);
 
 				fixed3 albedo = tex2D(_MainTex,i.uv.xy)*_DiffuseColor.rgb;//用纹理颜色代替漫反射材质颜色
 
-				fixed3 diffuse = _LightColor0.rgb*albedo.rgb*saturate(dot(tangentNormal,tangentLightDir));
+				fixed3 diffuse = _LightColor0.rgb*albedo.rgb*saturate(dot(worldNormal,worldLightDir));
 
 				fixed3 ambient = UNITY_LIGHTMODEL_AMBIENT.xyz*albedo;//如果没有自然光，那么背面没有光照的地方就是一片黑的
 				fixed3 color = ambient+diffuse+specular;
