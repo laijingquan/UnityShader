@@ -108,12 +108,13 @@ Shader "Learn/Chapter7/_RampTexture"
 
 				fixed halfLambert = 0.5*dot(worldNormal,worldLightDir)+0.5;
 				//fixed halfLambert = saturate( dot(worldNormal,worldLightDir));
-				fixed3 albedo = tex2D(_MainTex,fixed2(halfLambert,halfLambert)).rgb*_DiffuseColor.rgb;//不再用uv坐标去采样 而是采用halfLambert模式
+				fixed3 albedo = tex2D(_MainTex,fixed2(halfLambert,0)).rgb*_DiffuseColor.rgb;//不再用uv坐标去采样 而是采用halfLambert模式
 				//albedo是渐变色
 				fixed3 diffuse = _LightColor0.rgb*albedo.rgb;
 
 				fixed3 ambient = UNITY_LIGHTMODEL_AMBIENT.xyz;//如果没有自然光，那么背面没有光照的地方就是一片黑的
-				fixed3 color = ambient+diffuse+specular;
+				//fixed3 color = ambient+diffuse+specular;
+				fixed3 color = diffuse;//只看漫反射 是为了更加容易地观察渐变纹理的采样
 				return fixed4(color,1.0);
 			}
 			ENDCG
